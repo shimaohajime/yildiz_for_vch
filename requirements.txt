@@ -1,0 +1,9 @@
+torch
+scikit-learn
+pytest
+adjustText
+pyro-ppl
+numpy
+pandas
+scipy 
+matplotlib
