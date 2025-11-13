@@ -53,21 +53,33 @@ def read_labeled_timeseries(df, reset_time = False, time_unit = 1, data_dim=None
 
 if __name__ == "__main__":
 
-    data = 'GMD-VDEM-rGDP' #'Artist' # 
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    data_dir = os.path.join(project_root, "data")
+
+    data = 'MR-replication' #'Artist' # 'GMD-VDEM-rGDP' # 
     # Load the data
     if data == 'Artist':
         var = 'style'
-        # df = pd.read_csv(f"../data/Artist_npsde_top100.csv")
-        df = pd.read_csv(f"../data/Artist_npsde_top100.csv")
+        df_path = os.path.join(data_dir, "Artist_npsde_top100.csv")
+        df = pd.read_csv(df_path)
         # When there's duplicate in (Label,Time), take the mean
         df = df.groupby(['Label', 'Time']).mean().reset_index()
         save_file_name = 'Artist_top100'
     elif data == 'GMD-VDEM-rGDP':
-        df = pd.read_csv(f"../data/GMD_VDEM_npsde_rGDP_pc.csv")
+        df_path = os.path.join(data_dir, "GMD_VDEM_npsde_rGDP_pc.csv")
+        df = pd.read_csv(df_path)
         save_file_name = 'GMD_VDEM_rGDP_pc'
     elif data == 'GMD-VDEM-exports':
-        df = pd.read_csv(f"../data/GMD_VDEM_npsde_exports_GDP.csv")
+        df_path = os.path.join(data_dir, "GMD_VDEM_npsde_exports_GDP.csv")
+        df = pd.read_csv(df_path)
         save_file_name = 'GMD_VDEM_exports'
+    elif data == 'MR-replication':
+        df_path = os.path.join(data_dir, "mr_repliciation_for_npsde_pyro.csv")
+        df = pd.read_csv(df_path)
+        # When there's duplicate in (Label,Time), take the mean
+        df = df.groupby(['Label', 'Time']).mean().reset_index()
+        save_file_name = 'MR_replication'
         
     
     time_series, data_series = read_labeled_timeseries(df, reset_time=True)

@@ -533,6 +533,42 @@ def perturbation_KD(npsde : NPSDE, start, observed, Nw_base=50, Nw_sample=50):
         output += [np.where(np.sort(KD_score)==observed_score)[0]/len(KD_score)]
     return output
 
+def _transition_log_density_kde(npsde: NPSDE, start, observed, bandwidth=1.0, Nw=200):
+    """
+    Estimate log-density log P(observed | start) using Monte Carlo samples and KDE.
+    """
+    assert start.shape == observed.shape, "start and observed must have same shape"
+    X1 = np.concatenate([np.zeros((start.shape[0], 1)), start], axis=1)
+    X2 = np.concatenate([np.ones((start.shape[0], 1)), np.empty(start.shape)], axis=1)
+    X = np.empty((X1.shape[0] + X2.shape[0], X1.shape[1]))
+    X[::2] = X1
+    X[1::2] = X2
+    X = X.astype(np.float32)
+
+    samples = npsde.mc_samples(X, Nw)[:,:,:,1]  # Nw x N x D
+    kde = KernelDensity(bandwidth=bandwidth, kernel='gaussian', metric='euclidean')
+    log_scores = []
+    for i in range(samples.shape[1]):
+        mc_kde = kde.fit(samples[:, i, :])
+        log_scores.append(float(mc_kde.score_samples(observed[i:i+1])[0]))
+    return np.array(log_scores)
+
+def transition_log_ratio(npsde: NPSDE, current, nxt, bandwidth=1.0, Nw_forward=200, Nw_backward=200):
+    """
+    Compute log P(x_{t+1}=nxt | x_t=current) - log P(x_t=current | x_{t+1}=nxt)
+    using KDE-based density estimates derived from Monte Carlo samples.
+    Returns tuple: (log_ratio, log_forward, log_backward)
+    """
+    current = np.asarray(current, dtype=np.float32)
+    nxt = np.asarray(nxt, dtype=np.float32)
+    current = current.reshape(-1, current.shape[-1])
+    nxt = nxt.reshape(-1, nxt.shape[-1])
+
+    log_forward = _transition_log_density_kde(npsde, current, nxt, bandwidth=bandwidth, Nw=Nw_forward)
+    log_backward = _transition_log_density_kde(npsde, nxt, current, bandwidth=bandwidth, Nw=Nw_backward)
+    log_ratio = log_forward - log_backward
+    return log_ratio, log_forward, log_backward
+
 def irreversibility(npsde : NPSDE, extent, n_grid = 51, axis=0):
     xmin, xmax, ymin, ymax = extent 
     xv, yv = np.meshgrid(np.linspace(xmin, xmax, n_grid), np.linspace(ymin, ymax, n_grid))
