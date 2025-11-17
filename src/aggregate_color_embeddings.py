@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 
 def detect_embedding_columns(columns: Iterable[str], prefix: str) -> list[str]:
@@ -25,10 +26,60 @@ def detect_embedding_columns(columns: Iterable[str], prefix: str) -> list[str]:
     return [name for _, name in candidates]
 
 
+def aggregate_embeddings_by_artist_year(
+    df: pd.DataFrame, embedding_columns: Sequence[str]
+) -> pd.DataFrame:
+    """Aggregate embeddings and categorical metadata by artist and year."""
+    required_columns = {"artist", "date", "genre", "style"}
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise KeyError(f"Input dataframe is missing required columns: {sorted(missing)}")
+
+    # Check that all embedding columns exist
+    missing_emb = set(embedding_columns) - set(df.columns)
+    if missing_emb:
+        raise KeyError(f"Missing embedding columns: {sorted(missing_emb)}")
+
+    # Drop rows with missing embeddings
+    mask = df.loc[:, embedding_columns].notna().all(axis=1)
+    if not mask.any():
+        raise ValueError("No rows contain complete embedding data.")
+    df = df.loc[mask].copy()
+
+    # Aggregate: mean for embeddings, majority vote for categorical
+    agg_dict = {col: "mean" for col in embedding_columns}
+    agg_dict.update({"genre": majority_vote, "style": majority_vote})
+
+    aggregated = (
+        df.groupby(["artist", "date"], dropna=False)
+        .agg(agg_dict)
+        .reset_index()
+    )
+
+    # Filter artists with >= 10 years
+    counts = aggregated.groupby("artist")["date"].transform("nunique")
+    aggregated = aggregated.loc[counts >= 10].reset_index(drop=True)
+
+    return aggregated
+
+
+def standardize_embeddings(
+    df: pd.DataFrame, embedding_columns: Sequence[str]
+) -> pd.DataFrame:
+    """Standardize embedding columns to zero mean and unit variance."""
+    result = df.copy()
+    scaler = StandardScaler()
+    result.loc[:, embedding_columns] = scaler.fit_transform(result.loc[:, embedding_columns])
+    return result
+
+
 def compute_principal_components(
     df: pd.DataFrame, embedding_columns: Sequence[str], n_components: int = 2
 ) -> pd.DataFrame:
-    """Attach the first ``n_components`` principal components to ``df``."""
+    """Attach the first ``n_components`` principal components to ``df``.
+    
+    Assumes embeddings are already standardized.
+    """
     if len(embedding_columns) < n_components:
         raise ValueError(
             "Not enough embedding columns were found to compute the requested number of principal components."
@@ -50,21 +101,6 @@ def majority_vote(series: pd.Series) -> object:
     return mode.iloc[0]
 
 
-def aggregate_by_artist_year(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate principal components and categorical metadata by artist and year."""
-    required_columns = {"artist", "date", "PC1", "PC2", "genre", "style"}
-    missing = required_columns - set(df.columns)
-    if missing:
-        raise KeyError(f"Input dataframe is missing required columns: {sorted(missing)}")
-
-    aggregated = (
-        df.groupby(["artist", "date"], dropna=False)
-        .agg({"PC1": "mean", "PC2": "mean", "genre": majority_vote, "style": majority_vote})
-        .reset_index()
-    )
-
-    ordered_columns = ["artist", "date", "genre", "style", "PC1", "PC2"]
-    return aggregated.loc[:, ordered_columns]
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -110,7 +146,35 @@ def main() -> None:
             "dataset from https://github.com/bhargavvader/WikiArtVectors and provide its path."
         )
 
-    df = pd.read_csv(input_path)
+    if input_path.suffix.lower() in {".feather", ".ft"}:
+        try:
+            df = pd.read_feather(input_path)
+        except ImportError as exc:
+            raise ImportError(
+                "Reading Feather files requires the 'pyarrow' dependency. "
+                "Install it with `pip install pyarrow` and retry."
+            ) from exc
+    else:
+        df = pd.read_csv(input_path)
+
+    required_raw_columns = {"artist", "date"}
+    missing_raw = required_raw_columns - set(df.columns)
+    if missing_raw:
+        raise KeyError(f"Input file is missing required columns: {sorted(missing_raw)}")
+
+    df = df.copy()
+    df["artist"] = df["artist"].astype(str).str.strip()
+    suspicious_artists = {"", "unknown", "anonymous", "no artist", "n/a", "unnamed"}
+    invalid_mask = (
+        df["artist"].isna()
+        | df["artist"].str.lower().isin(suspicious_artists)
+        | df["artist"].str.startswith("#")
+    )
+    if invalid_mask.any():
+        df = df.loc[~invalid_mask].copy()
+
+    df["date"] = pd.to_numeric(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
 
     if args.embedding_columns is not None:
         embedding_columns = list(args.embedding_columns)
@@ -122,17 +186,21 @@ def main() -> None:
             "Unable to identify color embedding columns. Provide them explicitly with --embedding-columns."
         )
 
-    df_with_pcs = compute_principal_components(df, embedding_columns, n_components=2)
+    # Step 1: Aggregate by artist-year (this also filters to artists with >= 10 years)
+    aggregated = aggregate_embeddings_by_artist_year(df, embedding_columns)
 
-    # Drop columns that should not appear in the aggregated output but might remain in intermediate data.
-    columns_to_drop = [col for col in ("title", "filename") if col in df_with_pcs.columns]
-    if columns_to_drop:
-        df_with_pcs = df_with_pcs.drop(columns=columns_to_drop)
+    # Step 2: Standardize the aggregated embeddings
+    standardized = standardize_embeddings(aggregated, embedding_columns)
 
-    aggregated = aggregate_by_artist_year(df_with_pcs)
+    # Step 3: Apply PCA on standardized embeddings
+    result = compute_principal_components(standardized, embedding_columns, n_components=2)
+
+    # Select final columns and drop intermediate embedding columns
+    final_columns = ["artist", "date", "genre", "style", "PC1", "PC2"]
+    result = result.loc[:, final_columns]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    aggregated.to_csv(output_path, index=False)
+    result.to_csv(output_path, index=False)
 
 
 if __name__ == "__main__":
