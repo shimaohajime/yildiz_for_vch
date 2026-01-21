@@ -9,6 +9,30 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import os
 
+
+def remove_forward_filled_rows(df, id_col, time_col, value_cols):
+    """
+    Remove rows that are identical to the previous time step for the same entity.
+    This helps eliminate forward-filled values from the dataset before PCA.
+    """
+    df = df.sort_values([id_col, time_col]).reset_index(drop=True)
+    same_entity = df[id_col] == df[id_col].shift(1)
+
+    identical_values = np.ones(len(df), dtype=bool)
+    for col in value_cols:
+        identical_values &= np.isclose(
+            df[col].to_numpy(),
+            df[col].shift(1).to_numpy(),
+            equal_nan=True
+        )
+
+    forward_filled = same_entity & identical_values
+    cleaned_df = df[~forward_filled].reset_index(drop=True)
+    removed = len(df) - len(cleaned_df)
+    if removed > 0:
+        print(f"Removed {removed} forward-filled rows ({removed / len(df) * 100:.2f}%).")
+    return cleaned_df
+
 def apply_pca_to_mr_data(data_path, output_path=None):
     """
     Read the MR replication dataset and apply PCA on nine specified variables.
@@ -40,6 +64,9 @@ def apply_pca_to_mr_data(data_path, output_path=None):
     missing_vars = [var for var in variables if var not in df.columns]
     if missing_vars:
         raise ValueError(f"Missing variables in dataset: {missing_vars}")
+    
+    # Remove forward-filled rows before computing PCA
+    df = remove_forward_filled_rows(df, id_col='NGA', time_col='Time', value_cols=variables)
     
     # Extract the variables
     X = df[variables].values

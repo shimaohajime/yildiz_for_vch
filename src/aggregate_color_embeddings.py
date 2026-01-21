@@ -175,6 +175,13 @@ def main() -> None:
 
     df["date"] = pd.to_numeric(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
+    
+    # Filter to artworks produced after 1850
+    initial_size = len(df)
+    df = df[df["date"] > 1850].copy()
+    filtered_size = len(df)
+    if initial_size > filtered_size:
+        print(f"Filtered to artworks after 1850: {filtered_size} rows ({filtered_size/initial_size*100:.1f}% of original)")
 
     if args.embedding_columns is not None:
         embedding_columns = list(args.embedding_columns)
