@@ -4,6 +4,7 @@ Process SCV/Polaris data to produce NGA-level timeseries with Scale/Computation 
 
 import argparse
 import os
+from pathlib import Path
 
 import pandas as pd
 
@@ -103,9 +104,9 @@ def process_polaris_data(
     print(f"Unique NGAs: {df_output['NGA'].nunique()}")
     print(f"Year range: {df_output['Year'].min():.0f} to {df_output['Year'].max():.0f}")
     print(f"Time range: {df_output['Time'].min():.1f} to {df_output['Time'].max():.1f} centuries")
-    print(f"Source columns → outputs:")
-    print(f"  {scale_column} → Scale")
-    print(f"  {comp_column} → Computation")
+    print(f"Source columns -> outputs:")
+    print(f"  {scale_column} -> Scale")
+    print(f"  {comp_column} -> Computation")
     scale_desc = df_output['Scale'].describe()
     comp_desc = df_output['Computation'].describe()
     print("\nScale stats:")
@@ -115,6 +116,8 @@ def process_polaris_data(
     print("="*60)
     
     # Save output
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     df_output.to_csv(output_path, index=False)
     print(f"\nProcessed data saved to: {output_path}")
     
@@ -156,11 +159,13 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    
-    input_path = os.path.join(project_root, args.input)
-    output_path = os.path.join(project_root, args.output)
+    project_root = Path(__file__).resolve().parents[1]
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+    if not input_path.is_absolute():
+        input_path = project_root / input_path
+    if not output_path.is_absolute():
+        output_path = project_root / output_path
     
     process_polaris_data(
         input_path,
@@ -169,4 +174,3 @@ if __name__ == "__main__":
         scale_column=args.scale_col,
         comp_column=args.comp_col
     )
-

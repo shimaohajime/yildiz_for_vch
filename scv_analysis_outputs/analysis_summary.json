@@ -1,0 +1,66 @@
+{
+  "model_name": "SCV_pyro_model",
+  "n_variables": 2,
+  "variables": [
+    "Scale",
+    "Computation"
+  ],
+  "input_path": "data/scv_processed_for_npsde.csv",
+  "output_dir": "scv_analysis_outputs",
+  "training_time_seconds": 15392.606628894806,
+  "n_ngas_analyzed": 5,
+  "total_ngas": 27,
+  "notes": "Selected inspection outputs retained for the Section 6 cases discussed in the paper.",
+  "results": [
+    {
+      "NGA": "Paris Basin",
+      "n_points": 16,
+      "year_range": [
+        -300,
+        1800
+      ],
+      "metrics_path": "scv_analysis_outputs/Paris Basin_metrics.csv",
+      "plot_path": "scv_analysis_outputs/Paris Basin_aligned_plots.png"
+    },
+    {
+      "NGA": "Latium",
+      "n_points": 24,
+      "year_range": [
+        -700,
+        1800
+      ],
+      "metrics_path": "scv_analysis_outputs/Latium_metrics.csv",
+      "plot_path": "scv_analysis_outputs/Latium_aligned_plots.png"
+    },
+    {
+      "NGA": "Middle Yellow River Valley",
+      "n_points": 21,
+      "year_range": [
+        -1100,
+        1800
+      ],
+      "metrics_path": "scv_analysis_outputs/Middle Yellow River Valley_metrics.csv",
+      "plot_path": "scv_analysis_outputs/Middle Yellow River Valley_aligned_plots.png"
+    },
+    {
+      "NGA": "Sogdiana",
+      "n_points": 11,
+      "year_range": [
+        -200,
+        1500
+      ],
+      "metrics_path": "scv_analysis_outputs/Sogdiana_metrics.csv",
+      "plot_path": "scv_analysis_outputs/Sogdiana_aligned_plots.png"
+    },
+    {
+      "NGA": "Kansai",
+      "n_points": 10,
+      "year_range": [
+        800,
+        1800
+      ],
+      "metrics_path": "scv_analysis_outputs/Kansai_metrics.csv",
+      "plot_path": "scv_analysis_outputs/Kansai_aligned_plots.png"
+    }
+  ]
+}

@@ -1,3 +1,29 @@
+# OS/editor noise
+.DS_Store
+._*
+.vscode/
+.idea/
+
+# Python/cache/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Generated Section 6 run artifacts
+tmp_smoke_outputs/
+*_pyro_model.pt
+*_pyro_model_params.pt
+*_pyro_modeldiff.png
+*_pyro_modeldrift_sde.png
+*_pyro_modeldrift_stream.png
+
 # Binary and large data files
 *.png
 *.jpg
@@ -47,5 +73,3 @@
 *.tmp
 *.log
 *.lock
-__pycache__/
-*.pyc

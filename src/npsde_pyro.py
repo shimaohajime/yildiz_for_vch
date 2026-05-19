@@ -1,26 +1,26 @@
 import pandas as pd
 import numpy as np
 import pyro
-from scipy.stats.stats import ttest_ind_from_stats
 import torch
 import os
+import tempfile
 import pyro.distributions as dist
 import torch.distributions.constraints as constraints
-import matplotlib.pyplot as plt
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "matplotlib-cache"))
 import matplotlib as mpl
+mpl.use("Agg")
+import matplotlib.pyplot as plt
 import math
-import pickle
-import argparse
 from scipy.interpolate import interp1d
 from copy import deepcopy
-from pyro import optim
-from pyro.poutine import trace
-from pprint import pprint
 from pyro.infer import SVI, Trace_ELBO
 from sklearn.neighbors import KernelDensity
-import utils
-import preprocessing
-import json 
+
+
+def _as_float_tensor(value):
+    if torch.is_tensor(value):
+        return value.to(dtype=torch.float32)
+    return torch.tensor(value, dtype=torch.float32)
 
 class Kernel:
     '''
@@ -99,25 +99,27 @@ class NPSDE():
            self.Ug_map = Ug_map
 
     def compute_f(self, X, U, Z, kernel):
-        N = X.shape[0]
+        X = _as_float_tensor(X)
+        U = _as_float_tensor(U)
+        Z = _as_float_tensor(Z)
         M = Z.shape[0]
-        D = Z.shape[1] # dim of state
-        Kzz = kernel.K(Z) + torch.rand(M) * self.jitter
+        Kzz = kernel.K(Z) + torch.eye(M, dtype=Z.dtype, device=Z.device) * self.jitter
         Kzx = kernel.K(Z, X)
-        Lz = torch.cholesky(Kzz)
-        A = torch.triangular_solve(Kzx, Lz, upper=False)[0]
+        Lz = torch.linalg.cholesky(Kzz)
+        A = torch.linalg.solve_triangular(Lz, Kzx, upper=False)
         #Note U is whitened. Visualization requires unwhitening.
         f = torch.mm(A.t(), U)
         return f
 
     def compute_g(self, X, Ug, Zg, kernel):
-        N = X.shape[0]
+        X = _as_float_tensor(X)
+        Ug = _as_float_tensor(Ug)
+        Zg = _as_float_tensor(Zg)
         M = Zg.shape[0]
-        D = Zg.shape[1] # dim of state
-        Kzz = kernel.K(Zg) + torch.eye(M) * self.jitter
+        Kzz = kernel.K(Zg) + torch.eye(M, dtype=Zg.dtype, device=Zg.device) * self.jitter
         Kzx = kernel.K(Zg, X)
-        Lz = torch.cholesky(Kzz)
-        A = torch.triangular_solve(Kzx, Lz, upper=False)[0]
+        Lz = torch.linalg.cholesky(Kzz)
+        A = torch.linalg.solve_triangular(Lz, Kzx, upper=False)
         #Note Ug is whitened. Visualization requires unwhitening.
         g = torch.mm(A.t(), Ug)
         return torch.abs(g) #Since we are not generating Euler-Maruyama explicitly by sampling Gaussian noise, g needs to be positive.
@@ -141,8 +143,8 @@ class NPSDE():
     def unwhiten_U(self, U_whitened, Z, kernel):
         ##The estimated U and Ug are in whitened space, and requires un-whitening to get the original vectors.
         M = Z.shape[0]
-        Kzz = kernel.K(Z) + torch.eye(M) * self.jitter
-        Lz = torch.cholesky(Kzz)
+        Kzz = kernel.K(Z) + torch.eye(M, dtype=Z.dtype, device=Z.device) * self.jitter
+        Lz = torch.linalg.cholesky(Kzz)
         U = torch.mm(Lz,U_whitened)
         return U
 
@@ -633,98 +635,7 @@ def pyro_npsde_run(X, n_vars, steps, lr, Nw, sf_f,sf_g, ell_f, ell_g, noise, W, 
 
     npsde.train(X, n_steps=steps, lr=lr, Nw=Nw)
 
-    npsde.save_model('%s.pt' % save_model)
+    if save_model:
+        npsde.save_model('%s.pt' % save_model)
 
     return npsde # npsde.export_params()
-
-def TEST_load_vf():
-    df = pd.read_csv('../data/seshat_old_formatted.csv')
-    metadata = json.load(open('../data/seshat_old_metadata.json', 'r'))
-    state = {
-        'df': df
-    }
-    preprocessing.apply_standardscaling(state)
-    preprocessing.apply_pca(state)
-    preprocessing.read_labeled_timeseries(state, reset_time=True, time_unit=int(metadata['time_unit']), data_dim=2)
-    time, data = state['labeled_timeseries']
-    X = format_input_from_timedata(time, data)
-    X[:, 1:] = -X[:, 1:]
-    yildiz_vf = pd.read_csv('../data/yildiz_vf_.csv')
-    npsde = pyro_npsde_run(X, 2, 50, 0.02, 50, 1, 0.2, [1.0, 1.0], 0.5, [1.0, 1.0], 3, 0, 0, 0, 0.1, \
-    save_model='seshat_loadvf', Z=torch.tensor(np.c_[yildiz_vf['locx'], yildiz_vf['locy']], dtype=torch.float32), \
-        Zg=torch.tensor(np.c_[yildiz_vf['locx'], yildiz_vf['locy']], dtype=torch.float32), U_map=torch.tensor(np.c_[yildiz_vf['vecx'], yildiz_vf['vecy']], dtype=torch.float32))
-    
-    npsde.plot_model(X, "seshat_loadvf", Nw=1)
-    
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('load', nargs=3)
-    parser.add_argument('--graph', nargs='?', const='output')
-    parser.add_argument('--irreversibility', action='store_true')
-    parser.add_argument('--imputation', nargs='?', const=[50,50])
-    parser.add_argument('--perturbation', nargs=2, help='Two CSV files, containing starting points and observed points')
-
-
-    args = parser.parse_args()
-
-    # Load
-    npsde = NPSDE.load_model(args.load[0])
-    df = pd.read_csv(args.load[1])
-    metadata = json.load(args.load[2])
-    state = {
-        'df': df
-    }
-    preprocessing.read_labeled_timeseries(state, reset_time=True, time_unit=int(metadata['time_unit']), data_dim=2)
-    time, data = state['labeled_timeseries']
-    X = format_input_from_timedata(time, data)
-    
-    if args.graph:
-        npsde.plot_model(X, args.graph, Nw=3)
-
-    # # Perturbation detector
-    if args.perturbation:
-        data_start = pd.read_csv(args.perturbation[0]).to_numpy()
-        data_observed = pd.read_csv(args.perturbation[1]).to_numpy()
-        perturb = perturbation_KD(npsde, data_start, data_observed, Nw_base=50, Nw_sample=50)
-        plt.plot(perturb)
-        plt.show()
-
-    # # Imputation
-    if args.imputation:
-
-        # TESTING
-        # fraction_missing = 0.5
-        # data_modified = artificially_remove_data(data, fraction_missing)
-
-        series_MAP = []
-        # series_linear = []
-        for i in range(len(data)):
-            timeseries = np.concatenate([time[i].reshape(-1,1), data[i]], axis=1)
-            imputed_data_MAP = npsde.impute(timeseries, Nw=args.imputation[0], n_steps=args.imputation[1])[0].T
-            series_MAP += [imputed_data_MAP]
-            # imputed_timeseries_linear = impute_linear(timeseries)
-            # imputed_data_linear = imputed_timeseries_linear[:,1:]
-            # series_linear += [imputed_data_linear]
-
-        n_cols = int(math.sqrt(len(data)))
-        n_rows = int(math.ceil(len(data)/n_cols))
-
-
-
-        for i in range(len(data)):
-            plt.subplot(n_rows, n_cols, i+1)
-            # plt.plot(data[i][:,0], data[i][:,1], label='Actual')
-            # plt.plot(series_linear[i][:,0], series_linear[i][:,1], label='Linear')
-            plt.plot(series_MAP[i][:,0], series_MAP[i][:,1], label='MAP')
-
-        # plt.legend()
-        # print('Mean squared error (MAP): ', np.mean(np.concatenate([ np.sum((x - data[i])**2, axis=1) for i,x in enumerate(series_MAP)])))
-        # print('Mean squared error (Linear): ', np.mean(np.concatenate([ np.sum((x - data[i])**2, axis=1) for i,x in enumerate(series_linear)])))
-
-        plt.show()
-
-    if args.irreversibility:
-        heatmap = irreversibility(npsde, [np.min(X[:,1]), np.max(X[:,1]), np.min(X[:,2]), np.max(X[:2])])
-        plt.imshow(heatmap, cmap='viridis')
-        plt.show() 

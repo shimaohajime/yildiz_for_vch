@@ -8,13 +8,58 @@ import sys
 import time
 import json
 import argparse
+import warnings
+import tempfile
+from pathlib import Path
 import numpy as np
 import pandas as pd
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "matplotlib-cache"))
+import matplotlib as mpl
+mpl.use("Agg")
 import matplotlib.pyplot as plt
+import pyro
+import torch
 
-# Import from local src directory
-sys.path.append(os.path.dirname(__file__))
-from npsde_pyro import format_input_from_timedata, pyro_npsde_run, NPSDE, transition_log_ratio
+# Suppress noisy runtime warnings so redirected logs are easier to monitor.
+warnings.filterwarnings(
+    "ignore",
+    message="To copy construct from a tensor",
+    category=UserWarning
+)
+
+# Ensure stdout flushes immediately even when redirected (so progress logs show up)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+
+try:
+    from .npsde_pyro import format_input_from_timedata, pyro_npsde_run, transition_log_ratio
+except ImportError:  # pragma: no cover - supports direct script execution.
+    sys.path.append(os.path.dirname(__file__))
+    from npsde_pyro import format_input_from_timedata, pyro_npsde_run, transition_log_ratio
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def resolve_project_path(path):
+    path = Path(path)
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+def relative_to_project(path):
+    path = Path(path)
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def set_random_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    pyro.set_rng_seed(seed)
 
 
 def read_labeled_timeseries(df, reset_time=False, time_unit=1, data_dim=None):
@@ -149,7 +194,8 @@ def compute_nga_metrics(nga, npsde, processed_df, original_df, output_dir, bandw
     
     # Save metrics
     safe_nga_name = nga.replace('/', '_').replace('\\', '_')
-    metrics_path = os.path.join(output_dir, f'{safe_nga_name}_metrics.csv')
+    output_dir = Path(output_dir)
+    metrics_path = output_dir / f'{safe_nga_name}_metrics.csv'
     metrics_df.to_csv(metrics_path, index=False)
     
     # Create aligned plots
@@ -177,7 +223,7 @@ def compute_nga_metrics(nga, npsde, processed_df, original_df, output_dir, bandw
     axes[3].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plot_path = os.path.join(output_dir, f'{safe_nga_name}_aligned_plots.png')
+    plot_path = output_dir / f'{safe_nga_name}_aligned_plots.png'
     fig.savefig(plot_path, dpi=200)
     plt.close(fig)
     
@@ -185,14 +231,14 @@ def compute_nga_metrics(nga, npsde, processed_df, original_df, output_dir, bandw
         'NGA': nga,
         'n_points': len(proc),
         'year_range': (int(years.min()), int(years.max())),
-        'metrics_path': metrics_path,
-        'plot_path': plot_path,
+        'metrics_path': relative_to_project(metrics_path),
+        'plot_path': relative_to_project(plot_path),
     }
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
-        description='Run Yildiz NPSDE analysis on SCV/Polaris dataset'
+        description='Run Section 6 npSDE analysis on the SCV/Polaris Scale-Computation dataset'
     )
     parser.add_argument(
         '--input',
@@ -305,19 +351,33 @@ def main():
         help='Discretization step size for NPSDE'
     )
     parser.add_argument(
+        '--seed',
+        type=int,
+        default=20260125,
+        help='Random seed used by NumPy, PyTorch, and Pyro'
+    )
+    parser.add_argument(
+        '--plot-samples',
+        type=int,
+        default=50,
+        help='Number of Monte Carlo samples for model visualization plots'
+    )
+    parser.add_argument(
         '--ngas',
         nargs='+',
         help='Specific NGAs to analyze (if not provided, analyzes all)'
     )
-    
-    args = parser.parse_args()
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    
-    input_path = os.path.join(project_root, args.input)
-    output_dir = os.path.join(project_root, args.output_dir)
-    os.makedirs(output_dir, exist_ok=True)
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    input_path = resolve_project_path(args.input)
+    output_dir = resolve_project_path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    set_random_seed(args.seed)
     
     print("="*70)
     if len(args.ell_f) != 2:
@@ -325,12 +385,15 @@ def main():
     if len(args.noise) != 2:
         raise ValueError(f"--noise expects 2 values, got {args.noise}")
     
-    print("SCV / Polaris Yildiz NPSDE Analysis")
+    print("Section 6 SCV / Polaris npSDE Analysis")
     print("="*70)
+    print(f"  Input: {relative_to_project(input_path)}")
+    print(f"  Output directory: {relative_to_project(output_dir)}")
+    print(f"  Seed: {args.seed}")
     
     # Step 1: Prepare data
     print("\n[1/4] Preparing data for NPSDE format...")
-    prepared_path = os.path.join(output_dir, 'prepared_for_npsde.csv')
+    prepared_path = output_dir / 'prepared_for_npsde.csv'
     df_prepared = prepare_polaris_for_npsde(input_path, prepared_path)
     print(f"  Prepared {len(df_prepared)} rows for {df_prepared['Label'].nunique()} NGAs")
     
@@ -359,7 +422,7 @@ def main():
         fix_ell=args.fix_ell, 
         fix_Z=args.fix_Z, 
         delta_t=args.delta_t,
-        save_model=os.path.join(output_dir, args.model_name),
+        save_model=str(output_dir / args.model_name),
         Z=None, 
         Zg=None, 
         U_map=None, 
@@ -370,7 +433,7 @@ def main():
     
     # Generate model plots
     print("  Generating model visualization plots...")
-    npsde.plot_model(X, os.path.join(output_dir, args.model_name), Nw=50)
+    npsde.plot_model(X, str(output_dir / args.model_name), Nw=args.plot_samples)
     
     # Step 4: Compute metrics for NGAs
     print("\n[4/4] Computing perturbation and irreversibility metrics...")
@@ -388,11 +451,11 @@ def main():
             )
             if result:
                 results.append(result)
-                print(f"    ✓ Saved metrics and plots")
+                print("    saved metrics and plots")
             else:
-                print(f"    ✗ Skipped (insufficient data)")
+                print("    skipped (insufficient data)")
         except Exception as e:
-            print(f"    ✗ Error: {e}")
+            print(f"    error: {e}")
             continue
     
     # Save summary
@@ -400,20 +463,23 @@ def main():
         'model_name': args.model_name,
         'n_variables': 2,
         'variables': ['Scale', 'Computation'],
+        'input_path': relative_to_project(input_path),
+        'output_dir': relative_to_project(output_dir),
+        'seed': args.seed,
         'training_time_seconds': training_time,
         'n_ngas_analyzed': len(results),
         'total_ngas': len(ngas_to_analyze),
         'results': results,
     }
     
-    summary_path = os.path.join(output_dir, 'analysis_summary.json')
+    summary_path = output_dir / 'analysis_summary.json'
     with open(summary_path, 'w') as f:
         json.dump(summary, f, indent=2)
     
     print("\n" + "="*70)
     print("Analysis Complete!")
     print("="*70)
-    print(f"Results saved to: {output_dir}")
+    print(f"Results saved to: {relative_to_project(output_dir)}")
     print(f"  - Model: {args.model_name}.pt")
     print(f"  - Metrics for {len(results)} NGAs")
     print(f"  - Summary: analysis_summary.json")
@@ -422,4 +488,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

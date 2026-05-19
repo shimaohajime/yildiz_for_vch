@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this Section 6 replication package, please cite the associated paper."
+title: "Section 6 Historical Civilizations npSDE Replication Package"
+authors:
+  - family-names: "Bae"
+    given-names: "Youngkyoung"
+  - family-names: "Shimao"
+    given-names: "Hajime"
+  - family-names: "Ha"
+    given-names: "Seungwoong"
+  - family-names: "Yang"
+    given-names: "Luna"
+  - family-names: "Wolpert"
+    given-names: "David"
+repository-code: "https://github.com/shimaohajime/yildiz_for_vch"
+preferred-citation:
+  type: article
+  title: "Unveiling hidden features of social evolution by inferring Langevin dynamics from data"
+  authors:
+    - family-names: "Bae"
+      given-names: "Youngkyoung"
+    - family-names: "Shimao"
+      given-names: "Hajime"
+    - family-names: "Ha"
+      given-names: "Seungwoong"
+    - family-names: "Yang"
+      given-names: "Luna"
+    - family-names: "Wolpert"
+      given-names: "David"
+  year: 2026
+  identifiers:
+    - type: arxiv
+      value: "2601.17772"
